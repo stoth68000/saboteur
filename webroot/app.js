@@ -19,24 +19,28 @@ const controls = [
     title: "Drop Packets",
     command: "/api/drop",
     button: "Drop",
+    help: "Drops the next N MPEG-TS packets that would otherwise be forwarded.",
     fields: [["packets", "Packets", 1, 20]],
   },
   {
     title: "Drop Duration",
     command: "/api/drop_for",
     button: "Drop For",
+    help: "Drops every MPEG-TS packet for the selected number of milliseconds.",
     fields: [["ms", "Milliseconds", 1, 1000]],
   },
   {
     title: "Drop PID 0",
     command: "/api/drop_pid0_for",
     button: "Drop PAT",
+    help: "Drops PID 0 PAT packets for the selected number of milliseconds.",
     fields: [["ms", "Milliseconds", 1, 1000]],
   },
   {
     title: "Drop PID",
     command: "/api/drop_pid_for",
     button: "Drop PID",
+    help: "Drops only packets matching the decimal PID for the selected number of milliseconds.",
     fields: [
       ["ms", "Milliseconds", 1, 1000],
       ["pid", "PID decimal", 0, 49],
@@ -46,18 +50,21 @@ const controls = [
     title: "Drop Null Packets",
     command: "/api/drop_null_for",
     button: "Drop Null",
+    help: "Drops all MPEG-TS null packets, PID 8191, for the selected number of seconds.",
     fields: [["seconds", "Seconds", 1, 5]],
   },
   {
     title: "Drop Pattern",
     command: "/api/drop_every",
     button: "Set Pattern",
+    help: "Drops one packet out of every N packets. Set N to 0 to disable the pattern.",
     fields: [["n", "Drop 1 in N packets, 0 disables", 0, 10]],
   },
   {
     title: "Jitter",
     command: "/api/jitter",
     button: "Inject",
+    help: "Adds a one-shot delay before forwarding packets, repeated for the selected count.",
     fields: [
       ["ms", "Milliseconds", 1, 250],
       ["count", "Count", 1, 5],
@@ -67,24 +74,28 @@ const controls = [
     title: "Corrupt Bytes",
     command: "/api/corrupt",
     button: "Corrupt",
+    help: "Flips bits in the next N bytes of outgoing MPEG-TS packet payload.",
     fields: [["bytes", "Bytes", 1, 16]],
   },
   {
     title: "Flip TEI Bit",
     command: "/api/flip_tei",
     button: "Flip TEI",
+    help: "Toggles the Transport Error Indicator bit on the next N outgoing packets.",
     fields: [["packets", "Packets", 1, 20]],
   },
   {
     title: "Replace Sync Byte",
     command: "/api/replace_sync_for",
     button: "Replace Sync",
+    help: "For N seconds, changes each outgoing TS sync byte from 0x47 to 0x74.",
     fields: [["seconds", "Seconds", 1, 5]],
   },
   {
     title: "Fault Adaptation Length",
     command: "/api/fault_adaptation_length",
     button: "Set Length 191",
+    help: "For matching PID packets, enables adaptation plus payload and sets adaptation length to 191.",
     fields: [
       ["packets", "Packets", 1, 20],
       ["pid", "PID decimal", 0, 49],
@@ -94,12 +105,14 @@ const controls = [
     title: "UDP Packet Reorder",
     command: "/api/udp_packet_reorder",
     button: "Reorder Once",
+    help: "Captures three 7-packet UDP frames and sends them once as A, C, then B.",
     fields: [],
   },
   {
     title: "Enable PUSI",
     command: "/api/enable_pusi_for",
     button: "Enable PUSI",
+    help: "Waits for the PID, then sets PUSI on matching packets for N UDP frames.",
     fields: [
       ["frames", "UDP frames", 1, 3],
       ["pid", "PID decimal", 0, 49],
@@ -322,7 +335,13 @@ class SaboteurApp extends HTMLElement {
     const values = this.controlValues[control.command] || {};
     return `
       <form class="panel control-card" data-command="${control.command}">
-        <h2>${control.title}</h2>
+        <div class="card-title">
+          <h2>${control.title}</h2>
+          <span class="info-tip" tabindex="0" aria-label="${control.help}">
+            i
+            <span class="info-popover" role="tooltip">${control.help}</span>
+          </span>
+        </div>
         ${control.fields.map(([name, label, min, value]) => `
           <label for="control-${index}-${name}">${label}</label>
           <input id="control-${index}-${name}" name="${name}" type="number" min="${min}" value="${values[name] ?? value}">
