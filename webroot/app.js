@@ -7,6 +7,9 @@ const stats = [
   ["tei_packets_flipped", "TEI Flipped"],
   ["sync_bytes_replaced", "Sync Replaced"],
   ["adaptation_lengths_faulted", "AF Lengths"],
+  ["udp_reorders_completed", "UDP Reorders"],
+  ["pusi_packets_faulted", "PUSI Packets"],
+  ["pusi_frames_faulted", "PUSI Frames"],
   ["bytes_corrupted", "Corrupted Bytes"],
 ];
 
@@ -80,6 +83,21 @@ const controls = [
       ["pid", "PID decimal", 0, 49],
     ],
   },
+  {
+    title: "UDP Packet Reorder",
+    command: "/api/udp_packet_reorder",
+    button: "Reorder Once",
+    fields: [],
+  },
+  {
+    title: "Enable PUSI",
+    command: "/api/enable_pusi_for",
+    button: "Enable PUSI",
+    fields: [
+      ["frames", "UDP frames", 1, 3],
+      ["pid", "PID decimal", 0, 49],
+    ],
+  },
 ];
 
 const faultState = [
@@ -95,6 +113,10 @@ const faultState = [
   ["replace_sync_ms_remaining", "Sync replace ms"],
   ["adaptation_length_next_packets", "AF length queue"],
   ["adaptation_length_pid", "AF length PID"],
+  ["udp_reorder_pending", "UDP reorder queue"],
+  ["pusi_frames_remaining", "PUSI frames left"],
+  ["pusi_pid", "PUSI PID"],
+  ["pusi_waiting", "PUSI waiting"],
 ];
 
 function fmt(value) {
@@ -131,13 +153,13 @@ class SaboteurApp extends HTMLElement {
         throw new Error(`status ${response.status}`);
       }
       this.status = await response.json();
-      this.health = { ok: true, text: "Connected" };
+      this.health = { ok: true, text: "Running" };
       this.error = "";
     } catch (error) {
-      this.health = { ok: false, text: "Disconnected" };
+      this.health = { ok: false, text: "Not running" };
       this.error = String(error);
     }
-    this.render();
+    this.updateLiveValues();
   }
 
   async postCommand(path) {
@@ -147,13 +169,31 @@ class SaboteurApp extends HTMLElement {
         throw new Error(`command failed: ${response.status}`);
       }
       this.status = await response.json();
-      this.health = { ok: true, text: "Connected" };
+      this.health = { ok: true, text: "Running" };
       this.error = "";
     } catch (error) {
       this.health = { ok: false, text: "Command failed" };
       this.error = String(error);
     }
-    this.render();
+    this.updateLiveValues();
+  }
+
+  updateLiveValues() {
+    const health = this.querySelector(".health");
+    if (health) {
+      health.classList.toggle("is-ok", this.health.ok);
+      health.classList.toggle("is-error", !this.health.ok);
+      health.querySelector("[data-health-text]").textContent = this.health.text;
+    }
+
+    this.querySelectorAll("[data-status-key]").forEach((element) => {
+      element.textContent = fmt(this.status[element.dataset.statusKey]);
+    });
+
+    const statusJson = this.querySelector("[data-status-json]");
+    if (statusJson) {
+      statusJson.textContent = this.error || JSON.stringify(this.status, null, 2);
+    }
   }
 
   captureFocus() {
@@ -200,13 +240,21 @@ class SaboteurApp extends HTMLElement {
     this.innerHTML = `
       <main class="shell">
         <header class="topbar">
-          <div>
-            <h1>Saboteur</h1>
-            <p>MPEG-TS stream fault controls</p>
+          <div class="brand">
+            <span class="brand-logo-wrap">
+              <img class="brand-logo" src="/logo.png" alt="" aria-hidden="true">
+              <span class="logo-popover" role="presentation">
+                <img src="/logo.png" alt="">
+              </span>
+            </span>
+            <div>
+              <h1>Saboteur</h1>
+              <p>MPEG-TS stream fault injection</p>
+            </div>
           </div>
           <div class="health ${this.health.ok ? "is-ok" : "is-error"}">
             <span class="health-dot" aria-hidden="true"></span>
-            <span>${this.health.text}</span>
+            <span data-health-text>${this.health.text}</span>
           </div>
         </header>
 
@@ -214,7 +262,7 @@ class SaboteurApp extends HTMLElement {
           ${stats.map(([key, label]) => `
             <article class="stat-card">
               <span>${label}</span>
-              <strong>${fmt(this.status[key])}</strong>
+              <strong data-status-key="${key}">${fmt(this.status[key])}</strong>
             </article>
           `).join("")}
         </section>
@@ -225,7 +273,7 @@ class SaboteurApp extends HTMLElement {
             <h2>Fault State</h2>
             <dl class="active-state">
               ${faultState.map(([key, label]) => `
-                <div><dt>${label}</dt><dd>${fmt(this.status[key])}</dd></div>
+                <div><dt>${label}</dt><dd data-status-key="${key}">${fmt(this.status[key])}</dd></div>
               `).join("")}
             </dl>
             <button class="secondary" type="button" data-action="reset">Clear Faults</button>
@@ -239,10 +287,9 @@ class SaboteurApp extends HTMLElement {
               <button class="secondary compact" type="button" data-action="toggle-status">
                 ${this.statusExpanded ? "Collapse" : "Expand"}
               </button>
-              <button class="secondary compact" type="button" data-action="refresh">Refresh</button>
             </div>
           </div>
-          ${this.statusExpanded ? `<pre>${this.error || JSON.stringify(this.status, null, 2)}</pre>` : ""}
+          ${this.statusExpanded ? `<pre data-status-json>${this.error || JSON.stringify(this.status, null, 2)}</pre>` : ""}
         </section>
       </main>
     `;
@@ -254,10 +301,10 @@ class SaboteurApp extends HTMLElement {
       });
     });
     this.querySelector("[data-action='reset']").addEventListener("click", () => this.postCommand("/api/reset"));
-    this.querySelector("[data-action='refresh']").addEventListener("click", () => this.refreshStatus());
     this.querySelector("[data-action='toggle-status']").addEventListener("click", () => {
       this.statusExpanded = !this.statusExpanded;
       this.render();
+      this.updateLiveValues();
     });
 
     this.restoreFocus(focus);

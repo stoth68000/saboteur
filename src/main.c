@@ -21,7 +21,9 @@
 #include <libavutil/error.h>
 
 #define TS_PACKET_SIZE 188
-#define IO_BUFFER_SIZE (TS_PACKET_SIZE * 7)
+#define TS_PACKETS_PER_UDP 7
+#define UDP_PAYLOAD_SIZE (TS_PACKET_SIZE * TS_PACKETS_PER_UDP)
+#define IO_BUFFER_SIZE UDP_PAYLOAD_SIZE
 #define HTTP_BUFFER_SIZE 4096
 #define WEBROOT_DIR "webroot"
 
@@ -34,6 +36,9 @@ typedef struct {
     uint64_t tei_packets_flipped;
     uint64_t sync_bytes_replaced;
     uint64_t adaptation_lengths_faulted;
+    uint64_t udp_reorders_completed;
+    uint64_t pusi_packets_faulted;
+    uint64_t pusi_frames_faulted;
     uint64_t chunks_in;
     uint64_t chunks_out;
     uint64_t bytes_in;
@@ -55,6 +60,10 @@ typedef struct {
     int64_t replace_sync_until_ms;
     uint64_t adaptation_length_next_packets;
     uint16_t adaptation_length_pid;
+    uint32_t udp_reorder_pending;
+    uint32_t pusi_frames_remaining;
+    uint16_t pusi_pid;
+    bool pusi_waiting;
 } State;
 
 typedef struct {
@@ -63,9 +72,19 @@ typedef struct {
     int http_port;
 } Config;
 
+typedef struct {
+    uint8_t group[UDP_PAYLOAD_SIZE];
+    size_t group_len;
+    bool reorder_active;
+    uint8_t reorder_groups[3][UDP_PAYLOAD_SIZE];
+    size_t reorder_count;
+} OutputState;
+
 static State g_state;
 static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile sig_atomic_t g_stop = 0;
+static const char *g_input_url = "";
+static const char *g_output_url = "";
 
 static int64_t now_ms(void) {
     struct timeval tv;
@@ -87,6 +106,24 @@ static void on_signal(int sig) {
 
 static void fferr(char *dst, size_t dst_len, int errnum) {
     av_strerror(errnum, dst, dst_len);
+}
+
+static void json_escape(char *dst, size_t dst_len, const char *src) {
+    size_t out = 0;
+
+    if (dst_len == 0) {
+        return;
+    }
+
+    for (const unsigned char *p = (const unsigned char *)src; *p && out + 1 < dst_len; p++) {
+        if ((*p == '"' || *p == '\\') && out + 2 < dst_len) {
+            dst[out++] = '\\';
+            dst[out++] = (char)*p;
+        } else if (*p >= 0x20) {
+            dst[out++] = (char)*p;
+        }
+    }
+    dst[out] = '\0';
 }
 
 static long query_long(const char *path, const char *key, long fallback) {
@@ -265,14 +302,131 @@ static void maybe_fault_adaptation_length(uint8_t *packet) {
     }
 }
 
-static void write_packet(AVIOContext *out, const uint8_t *packet) {
-    avio_write(out, packet, TS_PACKET_SIZE);
+static void write_payload(AVIOContext *out, const uint8_t *payload, size_t len) {
+    avio_write(out, payload, (int)len);
     avio_flush(out);
 
     pthread_mutex_lock(&g_state_lock);
-    g_state.packets_out++;
-    g_state.bytes_out += TS_PACKET_SIZE;
+    g_state.chunks_out++;
+    g_state.packets_out += len / TS_PACKET_SIZE;
+    g_state.bytes_out += len;
     pthread_mutex_unlock(&g_state_lock);
+}
+
+static bool group_has_pid(const uint8_t *group, uint16_t pid) {
+    for (size_t i = 0; i < TS_PACKETS_PER_UDP; i++) {
+        if (ts_pid(group + (i * TS_PACKET_SIZE)) == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void maybe_fault_pusi_group(uint8_t *group) {
+    bool apply = false;
+    uint16_t pid = 0;
+
+    pthread_mutex_lock(&g_state_lock);
+    if (g_state.pusi_frames_remaining > 0) {
+        pid = g_state.pusi_pid;
+        if (g_state.pusi_waiting) {
+            if (group_has_pid(group, pid)) {
+                g_state.pusi_waiting = false;
+                apply = true;
+            }
+        } else {
+            apply = true;
+        }
+    }
+    pthread_mutex_unlock(&g_state_lock);
+
+    if (!apply) {
+        return;
+    }
+
+    uint64_t packets_faulted = 0;
+    for (size_t i = 0; i < TS_PACKETS_PER_UDP; i++) {
+        uint8_t *packet = group + (i * TS_PACKET_SIZE);
+        if (ts_pid(packet) == pid) {
+            packet[1] |= 0x40;
+            packets_faulted++;
+        }
+    }
+
+    pthread_mutex_lock(&g_state_lock);
+    if (g_state.pusi_frames_remaining > 0) {
+        g_state.pusi_frames_remaining--;
+        g_state.pusi_frames_faulted++;
+        g_state.pusi_packets_faulted += packets_faulted;
+    }
+    pthread_mutex_unlock(&g_state_lock);
+}
+
+static void write_output_group(AVIOContext *out, OutputState *output, uint8_t *group) {
+    maybe_fault_pusi_group(group);
+
+    pthread_mutex_lock(&g_state_lock);
+    if (!output->reorder_active && g_state.udp_reorder_pending > 0) {
+        g_state.udp_reorder_pending--;
+        output->reorder_active = true;
+        output->reorder_count = 0;
+    }
+    pthread_mutex_unlock(&g_state_lock);
+
+    if (output->reorder_active) {
+        memcpy(output->reorder_groups[output->reorder_count], group, UDP_PAYLOAD_SIZE);
+        output->reorder_count++;
+
+        if (output->reorder_count == 3) {
+            write_payload(out, output->reorder_groups[0], UDP_PAYLOAD_SIZE);
+            write_payload(out, output->reorder_groups[2], UDP_PAYLOAD_SIZE);
+            write_payload(out, output->reorder_groups[1], UDP_PAYLOAD_SIZE);
+
+            pthread_mutex_lock(&g_state_lock);
+            g_state.udp_reorders_completed++;
+            pthread_mutex_unlock(&g_state_lock);
+
+            output->reorder_active = false;
+            output->reorder_count = 0;
+        }
+        return;
+    }
+
+    write_payload(out, group, UDP_PAYLOAD_SIZE);
+}
+
+static void flush_output_group(AVIOContext *out, OutputState *output) {
+    if (output->group_len == 0) {
+        return;
+    }
+
+    if (output->group_len == UDP_PAYLOAD_SIZE) {
+        write_output_group(out, output, output->group);
+    } else {
+        write_payload(out, output->group, output->group_len);
+    }
+    output->group_len = 0;
+}
+
+static void enqueue_output_packet(AVIOContext *out, OutputState *output, const uint8_t *packet) {
+    memcpy(output->group + output->group_len, packet, TS_PACKET_SIZE);
+    output->group_len += TS_PACKET_SIZE;
+
+    if (output->group_len == UDP_PAYLOAD_SIZE) {
+        flush_output_group(out, output);
+    }
+}
+
+static void flush_reorder_remainder(AVIOContext *out, OutputState *output) {
+    if (!output->reorder_active) {
+        return;
+    }
+
+    for (size_t i = 0; i < output->reorder_count; i++) {
+        write_payload(out, output->reorder_groups[i], UDP_PAYLOAD_SIZE);
+    }
+    output->reorder_active = false;
+    output->reorder_count = 0;
 }
 
 static void *stream_thread(void *arg) {
@@ -282,6 +436,7 @@ static void *stream_thread(void *arg) {
     uint8_t buf[IO_BUFFER_SIZE];
     uint8_t packet_buf[IO_BUFFER_SIZE + TS_PACKET_SIZE];
     size_t packet_buf_len = 0;
+    OutputState output = {0};
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
 
     int ret = avio_open2(&in, cfg->input_url, AVIO_FLAG_READ, NULL, NULL);
@@ -353,7 +508,7 @@ static void *stream_thread(void *arg) {
                 maybe_corrupt(packet_buf, TS_PACKET_SIZE);
                 maybe_replace_sync_byte(packet_buf);
                 maybe_jitter();
-                write_packet(out, packet_buf);
+                enqueue_output_packet(out, &output, packet_buf);
             }
 
             memmove(packet_buf, packet_buf + TS_PACKET_SIZE, packet_buf_len - TS_PACKET_SIZE);
@@ -364,11 +519,10 @@ static void *stream_thread(void *arg) {
             }
         }
 
-        pthread_mutex_lock(&g_state_lock);
-        g_state.chunks_out++;
-        pthread_mutex_unlock(&g_state_lock);
     }
 
+    flush_reorder_remainder(out, &output);
+    flush_output_group(out, &output);
     avio_flush(out);
     avio_closep(&out);
     avio_closep(&in);
@@ -499,12 +653,20 @@ static bool serve_static_file(int fd, const char *request_path) {
 
 static void status_json(char *dst, size_t len) {
     State s;
+    char input_url[1024];
+    char output_url[1024];
+
+    json_escape(input_url, sizeof(input_url), g_input_url);
+    json_escape(output_url, sizeof(output_url), g_output_url);
+
     pthread_mutex_lock(&g_state_lock);
     s = g_state;
     pthread_mutex_unlock(&g_state_lock);
 
     snprintf(dst, len,
              "{"
+             "\"input_url\":\"%s\","
+             "\"output_url\":\"%s\","
              "\"packets_in\":%" PRIu64 ","
              "\"packets_out\":%" PRIu64 ","
              "\"packets_dropped\":%" PRIu64 ","
@@ -513,6 +675,9 @@ static void status_json(char *dst, size_t len) {
              "\"tei_packets_flipped\":%" PRIu64 ","
              "\"sync_bytes_replaced\":%" PRIu64 ","
              "\"adaptation_lengths_faulted\":%" PRIu64 ","
+             "\"udp_reorders_completed\":%" PRIu64 ","
+             "\"pusi_packets_faulted\":%" PRIu64 ","
+             "\"pusi_frames_faulted\":%" PRIu64 ","
              "\"chunks_in\":%" PRIu64 ","
              "\"chunks_out\":%" PRIu64 ","
              "\"bytes_in\":%" PRIu64 ","
@@ -532,11 +697,18 @@ static void status_json(char *dst, size_t len) {
              "\"flip_tei_next_packets\":%" PRIu64 ","
              "\"replace_sync_ms_remaining\":%" PRId64 ","
              "\"adaptation_length_next_packets\":%" PRIu64 ","
-             "\"adaptation_length_pid\":%u"
+             "\"adaptation_length_pid\":%u,"
+             "\"udp_reorder_pending\":%u,"
+             "\"pusi_frames_remaining\":%u,"
+             "\"pusi_pid\":%u,"
+             "\"pusi_waiting\":%u"
              "}",
+             input_url, output_url,
              s.packets_in, s.packets_out, s.packets_dropped, s.pid0_packets_dropped,
              s.pid_packets_dropped,
              s.tei_packets_flipped, s.sync_bytes_replaced, s.adaptation_lengths_faulted,
+             s.udp_reorders_completed,
+             s.pusi_packets_faulted, s.pusi_frames_faulted,
              s.chunks_in, s.chunks_out,
              s.bytes_in, s.bytes_out, s.bytes_corrupted, s.read_errors, s.write_errors,
              s.drop_next_packets,
@@ -548,7 +720,11 @@ static void status_json(char *dst, size_t len) {
              s.flip_tei_next_packets,
              s.replace_sync_until_ms > now_ms() ? s.replace_sync_until_ms - now_ms() : 0,
              s.adaptation_length_next_packets,
-             s.adaptation_length_pid);
+             s.adaptation_length_pid,
+             s.udp_reorder_pending,
+             s.pusi_frames_remaining,
+             s.pusi_pid,
+             s.pusi_waiting ? 1 : 0);
 }
 
 static void handle_client(int fd) {
@@ -645,6 +821,16 @@ static void handle_client(int fd) {
                 g_state.adaptation_length_pid = (uint16_t)pid;
             }
         }
+    } else if (strncmp(path, "/api/udp_packet_reorder", 23) == 0) {
+        g_state.udp_reorder_pending++;
+    } else if (strncmp(path, "/api/enable_pusi_for?", 21) == 0) {
+        long frames = query_long(path, "frames", 1);
+        long pid = query_long(path, "pid", 49);
+        if (frames > 0 && pid >= 0 && pid <= 8191) {
+            g_state.pusi_frames_remaining = (uint32_t)frames;
+            g_state.pusi_pid = (uint16_t)pid;
+            g_state.pusi_waiting = true;
+        }
     } else if (strncmp(path, "/api/reset", 10) == 0) {
         g_state.drop_next_packets = 0;
         g_state.drop_until_ms = 0;
@@ -659,6 +845,10 @@ static void handle_client(int fd) {
         g_state.replace_sync_until_ms = 0;
         g_state.adaptation_length_next_packets = 0;
         g_state.adaptation_length_pid = 49;
+        g_state.udp_reorder_pending = 0;
+        g_state.pusi_frames_remaining = 0;
+        g_state.pusi_pid = 49;
+        g_state.pusi_waiting = false;
     } else {
         pthread_mutex_unlock(&g_state_lock);
         send_response(fd, "404 Not Found", "text/plain", "not found\n");
@@ -777,8 +967,11 @@ int main(int argc, char **argv) {
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
     avformat_network_init();
+    g_input_url = cfg.input_url;
+    g_output_url = cfg.output_url;
     g_state.drop_pid = 49;
     g_state.adaptation_length_pid = 49;
+    g_state.pusi_pid = 49;
 
     if (pthread_create(&http_tid, NULL, http_thread, &cfg) != 0) {
         perror("pthread_create http");

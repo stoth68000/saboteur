@@ -45,6 +45,8 @@ curl -X POST 'http://127.0.0.1:9601/api/corrupt?bytes=16'
 curl -X POST 'http://127.0.0.1:9601/api/flip_tei?packets=20'
 curl -X POST 'http://127.0.0.1:9601/api/replace_sync_for?seconds=5'
 curl -X POST 'http://127.0.0.1:9601/api/fault_adaptation_length?packets=20&pid=49'
+curl -X POST 'http://127.0.0.1:9601/api/udp_packet_reorder'
+curl -X POST 'http://127.0.0.1:9601/api/enable_pusi_for?frames=3&pid=49'
 curl -X POST 'http://127.0.0.1:9601/api/reset'
 curl 'http://127.0.0.1:9601/api/status'
 ```

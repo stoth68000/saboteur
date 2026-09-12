@@ -54,6 +54,59 @@ input {
   margin-bottom: 20px;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand-logo-wrap {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+}
+
+.brand-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(13, 20, 31, 0.72);
+}
+
+.logo-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 20;
+  display: block;
+  width: min(320px, calc(100vw - 32px));
+  padding: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(13, 20, 31, 0.96);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+}
+
+.logo-popover img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.brand-logo-wrap:hover .logo-popover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 h1,
 h2,
 p {
