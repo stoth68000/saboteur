@@ -20,10 +20,15 @@ cmake --build build
 ./build/saboteur \
   --input-url 'udp://239.10.10.10:5000?overrun_nonfatal=1&fifo_size=5000000' \
   --output-url 'udp://127.0.0.1:6000' \
-  --http-port 9601
+  --http-port 9601 \
+  --add-latency 100
 ```
 
 Open `http://127.0.0.1:9601/` for the web UI.
+
+`--add-latency` is optional and buffers complete output UDP payloads for the
+given number of milliseconds before sending them. The configured value is
+exposed as `latency_ms` in `/api/status`.
 
 The web UI is served from `webroot/`. For now, run the binary from the project
 root so the built-in HTTP server can find `webroot/index.html`, `styles.css`,

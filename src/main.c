@@ -72,7 +72,13 @@ typedef struct {
     const char *input_url;
     const char *output_url;
     int http_port;
+    uint32_t latency_ms;
 } Config;
+
+typedef struct {
+    uint8_t payload[UDP_PAYLOAD_SIZE];
+    int64_t release_at_ms;
+} LatencyFrame;
 
 typedef struct {
     uint8_t group[UDP_PAYLOAD_SIZE];
@@ -80,6 +86,10 @@ typedef struct {
     bool reorder_active;
     uint8_t reorder_groups[3][UDP_PAYLOAD_SIZE];
     size_t reorder_count;
+    LatencyFrame *latency_frames;
+    size_t latency_count;
+    size_t latency_capacity;
+    uint32_t latency_ms;
 } OutputState;
 
 static State g_state;
@@ -87,6 +97,7 @@ static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile sig_atomic_t g_stop = 0;
 static const char *g_input_url = "";
 static const char *g_output_url = "";
+static uint32_t g_latency_ms = 0;
 
 static int64_t now_ms(void) {
     struct timeval tv;
@@ -323,6 +334,60 @@ static void write_payload(AVIOContext *out, const uint8_t *payload, size_t len) 
     pthread_mutex_unlock(&g_state_lock);
 }
 
+static bool ensure_latency_capacity(OutputState *output) {
+    if (output->latency_count < output->latency_capacity) {
+        return true;
+    }
+
+    size_t new_capacity = output->latency_capacity ? output->latency_capacity * 2 : 64;
+    LatencyFrame *new_frames = realloc(output->latency_frames, new_capacity * sizeof(*new_frames));
+    if (!new_frames) {
+        return false;
+    }
+
+    output->latency_frames = new_frames;
+    output->latency_capacity = new_capacity;
+    return true;
+}
+
+static void drain_latency_frames(AVIOContext *out, OutputState *output, bool force) {
+    int64_t now = now_ms();
+    size_t ready = 0;
+
+    while (ready < output->latency_count &&
+           (force || output->latency_frames[ready].release_at_ms <= now)) {
+        write_payload(out, output->latency_frames[ready].payload, UDP_PAYLOAD_SIZE);
+        ready++;
+    }
+
+    if (ready > 0) {
+        memmove(output->latency_frames,
+                output->latency_frames + ready,
+                (output->latency_count - ready) * sizeof(*output->latency_frames));
+        output->latency_count -= ready;
+    }
+}
+
+static void output_payload_with_latency(AVIOContext *out, OutputState *output, const uint8_t *payload) {
+    if (output->latency_ms == 0) {
+        write_payload(out, payload, UDP_PAYLOAD_SIZE);
+        return;
+    }
+
+    if (!ensure_latency_capacity(output)) {
+        pthread_mutex_lock(&g_state_lock);
+        g_state.write_errors++;
+        pthread_mutex_unlock(&g_state_lock);
+        return;
+    }
+
+    LatencyFrame *frame = &output->latency_frames[output->latency_count++];
+    memcpy(frame->payload, payload, UDP_PAYLOAD_SIZE);
+    frame->release_at_ms = now_ms() + output->latency_ms;
+
+    drain_latency_frames(out, output, false);
+}
+
 static bool group_has_pid(const uint8_t *group, uint16_t pid) {
     for (size_t i = 0; i < TS_PACKETS_PER_UDP; i++) {
         if (ts_pid(group + (i * TS_PACKET_SIZE)) == pid) {
@@ -388,9 +453,9 @@ static void write_output_group(AVIOContext *out, OutputState *output, uint8_t *g
         output->reorder_count++;
 
         if (output->reorder_count == 3) {
-            write_payload(out, output->reorder_groups[0], UDP_PAYLOAD_SIZE);
-            write_payload(out, output->reorder_groups[2], UDP_PAYLOAD_SIZE);
-            write_payload(out, output->reorder_groups[1], UDP_PAYLOAD_SIZE);
+            output_payload_with_latency(out, output, output->reorder_groups[0]);
+            output_payload_with_latency(out, output, output->reorder_groups[2]);
+            output_payload_with_latency(out, output, output->reorder_groups[1]);
 
             pthread_mutex_lock(&g_state_lock);
             g_state.udp_reorders_completed++;
@@ -402,7 +467,7 @@ static void write_output_group(AVIOContext *out, OutputState *output, uint8_t *g
         return;
     }
 
-    write_payload(out, group, UDP_PAYLOAD_SIZE);
+    output_payload_with_latency(out, output, group);
 }
 
 static void flush_output_group(AVIOContext *out, OutputState *output) {
@@ -433,7 +498,7 @@ static void flush_reorder_remainder(AVIOContext *out, OutputState *output) {
     }
 
     for (size_t i = 0; i < output->reorder_count; i++) {
-        write_payload(out, output->reorder_groups[i], UDP_PAYLOAD_SIZE);
+        output_payload_with_latency(out, output, output->reorder_groups[i]);
     }
     output->reorder_active = false;
     output->reorder_count = 0;
@@ -447,6 +512,7 @@ static void *stream_thread(void *arg) {
     uint8_t packet_buf[IO_BUFFER_SIZE + TS_PACKET_SIZE];
     size_t packet_buf_len = 0;
     OutputState output = {0};
+    output.latency_ms = cfg->latency_ms;
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
 
     int ret = avio_open2(&in, cfg->input_url, AVIO_FLAG_READ, NULL, NULL);
@@ -529,10 +595,13 @@ static void *stream_thread(void *arg) {
             }
         }
 
+        drain_latency_frames(out, &output, false);
     }
 
     flush_reorder_remainder(out, &output);
     flush_output_group(out, &output);
+    drain_latency_frames(out, &output, true);
+    free(output.latency_frames);
     avio_flush(out);
     avio_closep(&out);
     avio_closep(&in);
@@ -677,6 +746,7 @@ static void status_json(char *dst, size_t len) {
              "{"
              "\"input_url\":\"%s\","
              "\"output_url\":\"%s\","
+             "\"latency_ms\":%u,"
              "\"packets_in\":%" PRIu64 ","
              "\"packets_out\":%" PRIu64 ","
              "\"packets_dropped\":%" PRIu64 ","
@@ -715,7 +785,7 @@ static void status_json(char *dst, size_t len) {
              "\"pusi_pid\":%u,"
              "\"pusi_waiting\":%u"
              "}",
-             input_url, output_url,
+             input_url, output_url, g_latency_ms,
              s.packets_in, s.packets_out, s.packets_dropped, s.pid0_packets_dropped,
              s.pid_packets_dropped, s.null_packets_dropped,
              s.tei_packets_flipped, s.sync_bytes_replaced, s.adaptation_lengths_faulted,
@@ -944,10 +1014,10 @@ static void *http_thread(void *arg) {
 
 static void usage(const char *argv0) {
     fprintf(stderr,
-            "usage: %s --input-url URL --output-url URL [--http-port PORT]\n"
+            "usage: %s --input-url URL --output-url URL [--http-port PORT] [--add-latency MS]\n"
             "\n"
             "example:\n"
-            "  %s --input-url 'udp://239.10.10.10:5000?overrun_nonfatal=1' --output-url 'udp://127.0.0.1:6000'\n",
+            "  %s --input-url 'udp://239.10.10.10:5000?overrun_nonfatal=1' --output-url 'udp://127.0.0.1:6000' --add-latency 100\n",
             argv0, argv0);
 }
 
@@ -961,6 +1031,13 @@ static bool parse_args(int argc, char **argv, Config *cfg) {
             cfg->output_url = argv[++i];
         } else if (strcmp(argv[i], "--http-port") == 0 && i + 1 < argc) {
             cfg->http_port = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--add-latency") == 0 && i + 1 < argc) {
+            int latency_ms = atoi(argv[++i]);
+            if (latency_ms < 0) {
+                fprintf(stderr, "--add-latency must be >= 0\n");
+                return false;
+            }
+            cfg->latency_ms = (uint32_t)latency_ms;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             exit(0);
@@ -988,6 +1065,7 @@ int main(int argc, char **argv) {
     avformat_network_init();
     g_input_url = cfg.input_url;
     g_output_url = cfg.output_url;
+    g_latency_ms = cfg.latency_ms;
     g_state.drop_pid = 49;
     g_state.adaptation_length_pid = 49;
     g_state.pusi_pid = 49;
