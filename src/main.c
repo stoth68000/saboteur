@@ -33,6 +33,7 @@ typedef struct {
     uint64_t packets_dropped;
     uint64_t pid0_packets_dropped;
     uint64_t pid_packets_dropped;
+    uint64_t null_packets_dropped;
     uint64_t tei_packets_flipped;
     uint64_t sync_bytes_replaced;
     uint64_t adaptation_lengths_faulted;
@@ -51,6 +52,7 @@ typedef struct {
     int64_t drop_until_ms;
     int64_t drop_pid0_until_ms;
     int64_t drop_pid_until_ms;
+    int64_t drop_null_until_ms;
     uint16_t drop_pid;
     uint32_t drop_every_n;
     uint32_t jitter_ms;
@@ -182,6 +184,7 @@ static bool should_drop_packet(const uint8_t *packet, uint64_t packet_index) {
     bool drop = false;
     bool pid0_drop = false;
     bool pid_drop = false;
+    bool null_drop = false;
     int64_t now = now_ms();
     uint16_t pid = ts_pid(packet);
 
@@ -193,6 +196,10 @@ static bool should_drop_packet(const uint8_t *packet, uint64_t packet_index) {
     if (pid == g_state.drop_pid && g_state.drop_pid_until_ms > now) {
         drop = true;
         pid_drop = true;
+    }
+    if (pid == 0x1fff && g_state.drop_null_until_ms > now) {
+        drop = true;
+        null_drop = true;
     }
     if (g_state.drop_next_packets > 0) {
         g_state.drop_next_packets--;
@@ -212,6 +219,9 @@ static bool should_drop_packet(const uint8_t *packet, uint64_t packet_index) {
     }
     if (pid_drop) {
         g_state.pid_packets_dropped++;
+    }
+    if (null_drop) {
+        g_state.null_packets_dropped++;
     }
     pthread_mutex_unlock(&g_state_lock);
 
@@ -672,6 +682,7 @@ static void status_json(char *dst, size_t len) {
              "\"packets_dropped\":%" PRIu64 ","
              "\"pid0_packets_dropped\":%" PRIu64 ","
              "\"pid_packets_dropped\":%" PRIu64 ","
+             "\"null_packets_dropped\":%" PRIu64 ","
              "\"tei_packets_flipped\":%" PRIu64 ","
              "\"sync_bytes_replaced\":%" PRIu64 ","
              "\"adaptation_lengths_faulted\":%" PRIu64 ","
@@ -689,6 +700,7 @@ static void status_json(char *dst, size_t len) {
              "\"drop_ms_remaining\":%" PRId64 ","
              "\"drop_pid0_ms_remaining\":%" PRId64 ","
              "\"drop_pid_ms_remaining\":%" PRId64 ","
+             "\"drop_null_ms_remaining\":%" PRId64 ","
              "\"drop_pid\":%u,"
              "\"drop_every_n\":%u,"
              "\"jitter_ms\":%u,"
@@ -705,7 +717,7 @@ static void status_json(char *dst, size_t len) {
              "}",
              input_url, output_url,
              s.packets_in, s.packets_out, s.packets_dropped, s.pid0_packets_dropped,
-             s.pid_packets_dropped,
+             s.pid_packets_dropped, s.null_packets_dropped,
              s.tei_packets_flipped, s.sync_bytes_replaced, s.adaptation_lengths_faulted,
              s.udp_reorders_completed,
              s.pusi_packets_faulted, s.pusi_frames_faulted,
@@ -715,6 +727,7 @@ static void status_json(char *dst, size_t len) {
              s.drop_until_ms > now_ms() ? s.drop_until_ms - now_ms() : 0,
              s.drop_pid0_until_ms > now_ms() ? s.drop_pid0_until_ms - now_ms() : 0,
              s.drop_pid_until_ms > now_ms() ? s.drop_pid_until_ms - now_ms() : 0,
+             s.drop_null_until_ms > now_ms() ? s.drop_null_until_ms - now_ms() : 0,
              s.drop_pid,
              s.drop_every_n, s.jitter_ms, s.jitter_remaining, s.corrupt_next_bytes,
              s.flip_tei_next_packets,
@@ -789,6 +802,11 @@ static void handle_client(int fd) {
             g_state.drop_pid_until_ms = now_ms() + ms;
             g_state.drop_pid = (uint16_t)pid;
         }
+    } else if (strncmp(path, "/api/drop_null_for?", 19) == 0) {
+        long seconds = query_long(path, "seconds", 1);
+        if (seconds > 0) {
+            g_state.drop_null_until_ms = now_ms() + (seconds * 1000);
+        }
     } else if (strncmp(path, "/api/drop_every?", 16) == 0) {
         long n_every = query_long(path, "n", 0);
         g_state.drop_every_n = n_every > 0 ? (uint32_t)n_every : 0;
@@ -836,6 +854,7 @@ static void handle_client(int fd) {
         g_state.drop_until_ms = 0;
         g_state.drop_pid0_until_ms = 0;
         g_state.drop_pid_until_ms = 0;
+        g_state.drop_null_until_ms = 0;
         g_state.drop_pid = 49;
         g_state.drop_every_n = 0;
         g_state.jitter_ms = 0;

@@ -4,6 +4,7 @@ const stats = [
   ["packets_dropped", "Dropped"],
   ["pid0_packets_dropped", "PID 0 Dropped"],
   ["pid_packets_dropped", "PID Dropped"],
+  ["null_packets_dropped", "Null Dropped"],
   ["tei_packets_flipped", "TEI Flipped"],
   ["sync_bytes_replaced", "Sync Replaced"],
   ["adaptation_lengths_faulted", "AF Lengths"],
@@ -40,6 +41,12 @@ const controls = [
       ["ms", "Milliseconds", 1, 1000],
       ["pid", "PID decimal", 0, 49],
     ],
+  },
+  {
+    title: "Drop Null Packets",
+    command: "/api/drop_null_for",
+    button: "Drop Null",
+    fields: [["seconds", "Seconds", 1, 5]],
   },
   {
     title: "Drop Pattern",
@@ -105,6 +112,7 @@ const faultState = [
   ["drop_ms_remaining", "Drop ms"],
   ["drop_pid0_ms_remaining", "PID 0 ms"],
   ["drop_pid_ms_remaining", "PID drop ms"],
+  ["drop_null_ms_remaining", "Null drop ms"],
   ["drop_pid", "Drop PID"],
   ["drop_every_n", "Drop every"],
   ["jitter_remaining", "Jitter left"],
