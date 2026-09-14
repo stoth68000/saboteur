@@ -4,6 +4,8 @@ Saboteur is a small MPEG-TS stream damage harness. It reads from an FFmpeg URL
 such as UDP or SRT, forwards bytes to another FFmpeg URL, and exposes a tiny
 REST/Web UI for triggering faults while another project is consuming the output.
 
+![Saboteur Web UI](README-screenshot.png)
+
 ## Build
 
 Install FFmpeg development headers with `libavformat` and `libavutil` available
