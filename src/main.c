@@ -49,6 +49,7 @@ typedef struct {
     uint64_t read_errors;
     uint64_t write_errors;
 
+    bool drop_all_output;
     uint64_t drop_next_packets;
     int64_t drop_until_ms;
     int64_t drop_pid0_until_ms;
@@ -251,6 +252,56 @@ static bool json_long(const char *body, const char *key, long *value) {
     return true;
 }
 
+static bool json_bool(const char *body, const char *key, bool *value) {
+    char needle[80];
+    int n = snprintf(needle, sizeof(needle), "\"%s\"", key);
+    if (n <= 0 || (size_t)n >= sizeof(needle)) {
+        return false;
+    }
+
+    const char *match = strstr(body, needle);
+    if (!match) {
+        return false;
+    }
+
+    const char *p = match + n;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+    if (*p != ':') {
+        return false;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+
+    if (strncmp(p, "true", 4) == 0) {
+        const char *end = p + 4;
+        while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') {
+            end++;
+        }
+        if (*end != ',' && *end != '}' && *end != '\0') {
+            return false;
+        }
+        *value = true;
+        return true;
+    }
+    if (strncmp(p, "false", 5) == 0) {
+        const char *end = p + 5;
+        while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') {
+            end++;
+        }
+        if (*end != ',' && *end != '}' && *end != '\0') {
+            return false;
+        }
+        *value = false;
+        return true;
+    }
+
+    return false;
+}
+
 static bool json_object_body(const char *body) {
     const char *start = body;
     while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
@@ -418,7 +469,22 @@ static void maybe_fault_adaptation_length(uint8_t *packet) {
     }
 }
 
+static bool drop_all_output_payload(size_t len) {
+    pthread_mutex_lock(&g_state_lock);
+    if (g_state.drop_all_output) {
+        g_state.packets_dropped += len / TS_PACKET_SIZE;
+        pthread_mutex_unlock(&g_state_lock);
+        return true;
+    }
+    pthread_mutex_unlock(&g_state_lock);
+    return false;
+}
+
 static void write_payload(AVIOContext *out, const uint8_t *payload, size_t len) {
+    if (drop_all_output_payload(len)) {
+        return;
+    }
+
     avio_write(out, payload, (int)len);
     avio_flush(out);
 
@@ -533,6 +599,19 @@ static void maybe_fault_pusi_group(uint8_t *group) {
 }
 
 static void write_output_group(AVIOContext *out, OutputState *output, uint8_t *group) {
+    pthread_mutex_lock(&g_state_lock);
+    if (g_state.drop_all_output) {
+        g_state.packets_dropped += TS_PACKETS_PER_UDP;
+        if (output->reorder_active) {
+            g_state.packets_dropped += output->reorder_count * TS_PACKETS_PER_UDP;
+            output->reorder_active = false;
+            output->reorder_count = 0;
+        }
+        pthread_mutex_unlock(&g_state_lock);
+        return;
+    }
+    pthread_mutex_unlock(&g_state_lock);
+
     maybe_fault_pusi_group(group);
 
     pthread_mutex_lock(&g_state_lock);
@@ -865,6 +944,7 @@ static void status_json(char *dst, size_t len) {
              "\"bytes_corrupted\":%" PRIu64 ","
              "\"read_errors\":%" PRIu64 ","
              "\"write_errors\":%" PRIu64 ","
+             "\"drop_all_output\":%u,"
              "\"drop_next_packets\":%" PRIu64 ","
              "\"drop_ms_remaining\":%" PRId64 ","
              "\"drop_pid0_ms_remaining\":%" PRId64 ","
@@ -892,6 +972,7 @@ static void status_json(char *dst, size_t len) {
              s.pusi_packets_faulted, s.pusi_frames_faulted,
              s.chunks_in, s.chunks_out,
              s.bytes_in, s.bytes_out, s.bytes_corrupted, s.read_errors, s.write_errors,
+             s.drop_all_output ? 1 : 0,
              s.drop_next_packets,
              s.drop_until_ms > now_ms() ? s.drop_until_ms - now_ms() : 0,
              s.drop_pid0_until_ms > now_ms() ? s.drop_pid0_until_ms - now_ms() : 0,
@@ -951,7 +1032,7 @@ static void handle_client(int fd) {
     }
 
     if (strcmp(method, "GET") == 0 && strcmp(path, "/api/status") == 0) {
-        char body[2048];
+        char body[4096];
         status_json(body, sizeof(body));
         send_response(fd, "200 OK", "application/json", body);
         return;
@@ -970,6 +1051,7 @@ static void handle_client(int fd) {
     }
 
     bool needs_json_body = strcmp(path, "/api/drop") == 0 ||
+                           strcmp(path, "/api/drop_output") == 0 ||
                            strcmp(path, "/api/drop_for") == 0 ||
                            strcmp(path, "/api/drop_pid0_for") == 0 ||
                            strcmp(path, "/api/drop_pid_for") == 0 ||
@@ -999,6 +1081,13 @@ static void handle_client(int fd) {
             bad_request = true;
         } else {
             g_state.drop_next_packets += (uint64_t)packets;
+        }
+    } else if (strcmp(path, "/api/drop_output") == 0) {
+        bool enabled = false;
+        if (!json_bool(request_body, "enabled", &enabled)) {
+            bad_request = true;
+        } else {
+            g_state.drop_all_output = enabled;
         }
     } else if (strcmp(path, "/api/drop_for") == 0) {
         long ms = 0;
@@ -1097,6 +1186,7 @@ static void handle_client(int fd) {
             g_state.pusi_waiting = true;
         }
     } else if (strcmp(path, "/api/reset") == 0) {
+        g_state.drop_all_output = false;
         g_state.drop_next_packets = 0;
         g_state.drop_until_ms = 0;
         g_state.drop_pid0_until_ms = 0;
@@ -1127,7 +1217,7 @@ static void handle_client(int fd) {
         return;
     }
 
-    char body[2048];
+    char body[4096];
     status_json(body, sizeof(body));
     send_response(fd, "200 OK", "application/json", body);
 }

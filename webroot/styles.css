@@ -318,6 +318,17 @@ button.secondary:hover {
   background: rgba(79, 140, 255, 0.12);
 }
 
+button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #1f0302;
+}
+
+button.danger:hover {
+  border-color: #ff8a85;
+  background: #ff8a85;
+}
+
 button.compact {
   min-height: 32px;
   margin-top: 0;

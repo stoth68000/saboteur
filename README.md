@@ -46,6 +46,8 @@ fields.
 
 ```sh
 curl -X POST -H 'Content-Type: application/json' -d '{"packets":20}' 'http://127.0.0.1:9601/api/drop'
+curl -X POST -H 'Content-Type: application/json' -d '{"enabled":true}' 'http://127.0.0.1:9601/api/drop_output'
+curl -X POST -H 'Content-Type: application/json' -d '{"enabled":false}' 'http://127.0.0.1:9601/api/drop_output'
 curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_for'
 curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_pid0_for'
 curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000,"pid":49}' 'http://127.0.0.1:9601/api/drop_pid_for'

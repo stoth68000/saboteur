@@ -69,6 +69,33 @@
         }
       }
     },
+    "/api/drop_output": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Toggle dropping all output",
+        "description": "Enables or disables dropping every output payload before it is written to the configured output URL.",
+        "operationId": "dropOutput",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/OutputGate"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
     "/api/drop_for": {
       "post": {
         "tags": [
@@ -449,6 +476,29 @@
         },
         "required": true
       },
+      "OutputGate": {
+        "description": "Output dropping toggle command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OutputGateCommand"
+            },
+            "examples": {
+              "disableOutput": {
+                "value": {
+                  "enabled": true
+                }
+              },
+              "enableOutput": {
+                "value": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        },
+        "required": true
+      },
       "Milliseconds": {
         "description": "Millisecond duration command body.",
         "content": {
@@ -553,6 +603,18 @@
           "packets": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "OutputGateCommand": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "true drops all output payloads; false resumes writing output."
           }
         }
       },
@@ -696,6 +758,7 @@
           "bytes_corrupted",
           "read_errors",
           "write_errors",
+          "drop_all_output",
           "drop_next_packets",
           "drop_ms_remaining",
           "drop_pid0_ms_remaining",
@@ -785,6 +848,12 @@
           },
           "write_errors": {
             "$ref": "#/components/schemas/Counter"
+          },
+          "drop_all_output": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "1 while all output payloads are being dropped; otherwise 0."
           },
           "drop_next_packets": {
             "$ref": "#/components/schemas/Counter"

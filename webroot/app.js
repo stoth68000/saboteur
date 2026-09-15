@@ -121,6 +121,7 @@ const controls = [
 ];
 
 const faultState = [
+  ["drop_all_output", "Drop output"],
   ["drop_next_packets", "Drop queue"],
   ["drop_ms_remaining", "Drop ms"],
   ["drop_pid0_ms_remaining", "PID 0 ms"],
@@ -142,6 +143,13 @@ const faultState = [
 
 function fmt(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function fmtStatus(key, value) {
+  if (key === "drop_all_output") {
+    return Number(value || 0) ? "On" : "Off";
+  }
+  return fmt(value);
 }
 
 function initialControlValues() {
@@ -212,8 +220,17 @@ class SaboteurApp extends HTMLElement {
     }
 
     this.querySelectorAll("[data-status-key]").forEach((element) => {
-      element.textContent = fmt(this.status[element.dataset.statusKey]);
+      element.textContent = fmtStatus(element.dataset.statusKey, this.status[element.dataset.statusKey]);
     });
+
+    const outputToggle = this.querySelector("[data-action='toggle-output']");
+    if (outputToggle) {
+      const dropAllOutput = Boolean(Number(this.status.drop_all_output || 0));
+      outputToggle.textContent = dropAllOutput ? "Enable Output" : "Drop Output";
+      outputToggle.classList.toggle("danger", !dropAllOutput);
+      outputToggle.classList.toggle("secondary", dropAllOutput);
+      outputToggle.setAttribute("aria-pressed", String(dropAllOutput));
+    }
 
     const statusJson = this.querySelector("[data-status-json]");
     if (statusJson) {
@@ -298,9 +315,12 @@ class SaboteurApp extends HTMLElement {
             <h2>Fault State</h2>
             <dl class="active-state">
               ${faultState.map(([key, label]) => `
-                <div><dt>${label}</dt><dd data-status-key="${key}">${fmt(this.status[key])}</dd></div>
+                <div><dt>${label}</dt><dd data-status-key="${key}">${fmtStatus(key, this.status[key])}</dd></div>
               `).join("")}
             </dl>
+            <button class="danger" type="button" data-action="toggle-output" aria-pressed="${Boolean(Number(this.status.drop_all_output || 0))}">
+              ${Number(this.status.drop_all_output || 0) ? "Enable Output" : "Drop Output"}
+            </button>
             <button class="secondary" type="button" data-action="reset">Clear Faults</button>
           </section>
         </section>
@@ -323,6 +343,11 @@ class SaboteurApp extends HTMLElement {
       form.addEventListener("submit", (event) => this.submitControl(event));
       form.querySelectorAll("input[name]").forEach((input) => {
         input.addEventListener("input", (event) => this.updateControlValue(event));
+      });
+    });
+    this.querySelector("[data-action='toggle-output']").addEventListener("click", () => {
+      this.postCommand("/api/drop_output", {
+        enabled: !Boolean(Number(this.status.drop_all_output || 0)),
       });
     });
     this.querySelector("[data-action='reset']").addEventListener("click", () => this.postCommand("/api/reset"));
