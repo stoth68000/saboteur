@@ -1199,7 +1199,7 @@ static void usage(const char *argv0) {
             "usage: %s --input-url URL --output-url URL [--http-port PORT] [--add-latency MS]\n"
             "\n"
             "example:\n"
-            "  %s --input-url 'udp://239.10.10.10:5000?overrun_nonfatal=1' --output-url 'udp://127.0.0.1:6000' --add-latency 100\n",
+            "  %s --input-url 'udp://227.1.1.1:4099?overrun_nonfatal=1' --output-url 'udp://127.0.0.1:4501?pkt_size=1316' --add-latency 2000 --http-port 9501\n",
             argv0, argv0);
 }
 
