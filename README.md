@@ -39,23 +39,26 @@ so it does not require a frontend build step.
 
 ## REST API
 
-All commands are immediate and can be invoked while forwarding is active.
+All commands are immediate and can be invoked while forwarding is active. POST
+commands accept JSON request bodies, require `Content-Type: application/json`
+when fields are present, and return `400 Bad Request` for missing or invalid
+fields.
 
 ```sh
-curl -H 'Content-Type: application/json' -d '{"packets":20}' 'http://127.0.0.1:9601/api/drop'
-curl -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_for'
-curl -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_pid0_for'
-curl -H 'Content-Type: application/json' -d '{"ms":1000,"pid":49}' 'http://127.0.0.1:9601/api/drop_pid_for'
-curl -H 'Content-Type: application/json' -d '{"seconds":5}' 'http://127.0.0.1:9601/api/drop_null_for'
-curl -H 'Content-Type: application/json' -d '{"n":10}' 'http://127.0.0.1:9601/api/drop_every'
-curl -H 'Content-Type: application/json' -d '{"ms":250,"count":5}' 'http://127.0.0.1:9601/api/jitter'
-curl -H 'Content-Type: application/json' -d '{"bytes":16}' 'http://127.0.0.1:9601/api/corrupt'
-curl -H 'Content-Type: application/json' -d '{"packets":20}' 'http://127.0.0.1:9601/api/flip_tei'
-curl -H 'Content-Type: application/json' -d '{"seconds":5}' 'http://127.0.0.1:9601/api/replace_sync_for'
-curl -H 'Content-Type: application/json' -d '{"packets":20,"pid":49}' 'http://127.0.0.1:9601/api/fault_adaptation_length'
-curl -H 'Content-Type: application/json' -d '{}' 'http://127.0.0.1:9601/api/udp_packet_reorder'
-curl -H 'Content-Type: application/json' -d '{"frames":3,"pid":49}' 'http://127.0.0.1:9601/api/enable_pusi_for'
-curl -H 'Content-Type: application/json' -d '{}' 'http://127.0.0.1:9601/api/reset'
+curl -X POST -H 'Content-Type: application/json' -d '{"packets":20}' 'http://127.0.0.1:9601/api/drop'
+curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_for'
+curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000}' 'http://127.0.0.1:9601/api/drop_pid0_for'
+curl -X POST -H 'Content-Type: application/json' -d '{"ms":1000,"pid":49}' 'http://127.0.0.1:9601/api/drop_pid_for'
+curl -X POST -H 'Content-Type: application/json' -d '{"seconds":5}' 'http://127.0.0.1:9601/api/drop_null_for'
+curl -X POST -H 'Content-Type: application/json' -d '{"n":10}' 'http://127.0.0.1:9601/api/drop_every'
+curl -X POST -H 'Content-Type: application/json' -d '{"ms":250,"count":5}' 'http://127.0.0.1:9601/api/jitter'
+curl -X POST -H 'Content-Type: application/json' -d '{"bytes":16}' 'http://127.0.0.1:9601/api/corrupt'
+curl -X POST -H 'Content-Type: application/json' -d '{"packets":20}' 'http://127.0.0.1:9601/api/flip_tei'
+curl -X POST -H 'Content-Type: application/json' -d '{"seconds":5}' 'http://127.0.0.1:9601/api/replace_sync_for'
+curl -X POST -H 'Content-Type: application/json' -d '{"packets":20,"pid":49}' 'http://127.0.0.1:9601/api/fault_adaptation_length'
+curl -X POST -H 'Content-Type: application/json' -d '{}' 'http://127.0.0.1:9601/api/udp_packet_reorder'
+curl -X POST -H 'Content-Type: application/json' -d '{"frames":3,"pid":49}' 'http://127.0.0.1:9601/api/enable_pusi_for'
+curl -X POST -H 'Content-Type: application/json' -d '{}' 'http://127.0.0.1:9601/api/reset'
 curl 'http://127.0.0.1:9601/api/status'
 ```
 
