@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -139,26 +140,29 @@ static void json_escape(char *dst, size_t dst_len, const char *src) {
     dst[out] = '\0';
 }
 
-static long query_long(const char *path, const char *key, long fallback) {
-    const char *query = strchr(path, '?');
+static long header_long(const char *req, const char *key, long fallback) {
+    const char *line = req;
     size_t key_len = strlen(key);
 
-    if (!query) {
-        return fallback;
-    }
-    query++;
+    while (line && *line) {
+        const char *next = strstr(line, "\r\n");
+        size_t len = next ? (size_t)(next - line) : strlen(line);
 
-    while (*query) {
-        const char *next = strchr(query, '&');
-        size_t len = next ? (size_t)(next - query) : strlen(query);
+        if (len == 0) {
+            break;
+        }
 
-        if (len > key_len && strncmp(query, key, key_len) == 0 && query[key_len] == '=') {
+        if (len > key_len && strncasecmp(line, key, key_len) == 0 && line[key_len] == ':') {
             char tmp[64];
-            size_t value_len = len - key_len - 1;
+            const char *value = line + key_len + 1;
+            while (*value == ' ' || *value == '\t') {
+                value++;
+            }
+            size_t value_len = len - (size_t)(value - line);
             if (value_len >= sizeof(tmp)) {
                 value_len = sizeof(tmp) - 1;
             }
-            memcpy(tmp, query + key_len + 1, value_len);
+            memcpy(tmp, value, value_len);
             tmp[value_len] = '\0';
             return strtol(tmp, NULL, 10);
         }
@@ -166,10 +170,101 @@ static long query_long(const char *path, const char *key, long fallback) {
         if (!next) {
             break;
         }
-        query = next + 1;
+        line = next + 2;
     }
 
     return fallback;
+}
+
+static bool header_has_token(const char *req, const char *key, const char *token) {
+    const char *line = req;
+    size_t key_len = strlen(key);
+    size_t token_len = strlen(token);
+
+    while (line && *line) {
+        const char *next = strstr(line, "\r\n");
+        size_t len = next ? (size_t)(next - line) : strlen(line);
+
+        if (len == 0) {
+            break;
+        }
+
+        if (len > key_len && strncasecmp(line, key, key_len) == 0 && line[key_len] == ':') {
+            const char *value = line + key_len + 1;
+            const char *line_end = line + len;
+            while (value + token_len <= line_end) {
+                if (strncasecmp(value, token, token_len) == 0) {
+                    return true;
+                }
+                value++;
+            }
+            return false;
+        }
+
+        if (!next) {
+            break;
+        }
+        line = next + 2;
+    }
+
+    return false;
+}
+
+static bool json_long(const char *body, const char *key, long *value) {
+    char needle[80];
+    int n = snprintf(needle, sizeof(needle), "\"%s\"", key);
+    if (n <= 0 || (size_t)n >= sizeof(needle)) {
+        return false;
+    }
+
+    const char *match = strstr(body, needle);
+    if (!match) {
+        return false;
+    }
+
+    const char *p = match + n;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+    if (*p != ':') {
+        return false;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+
+    char *end = NULL;
+    long parsed = strtol(p, &end, 10);
+    if (end == p) {
+        return false;
+    }
+
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') {
+        end++;
+    }
+    if (*end != ',' && *end != '}' && *end != '\0') {
+        return false;
+    }
+
+    *value = parsed;
+    return true;
+}
+
+static bool json_object_body(const char *body) {
+    const char *start = body;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+        start++;
+    }
+    if (*start != '{') {
+        return false;
+    }
+
+    const char *end = body + strlen(body);
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) {
+        end--;
+    }
+    return end > start && end[-1] == '}';
 }
 
 static uint16_t ts_pid(const uint8_t *packet) {
@@ -616,6 +711,8 @@ static void send_response(int fd, const char *status, const char *type, const ch
             "Content-Length: %zu\r\n"
             "Connection: close\r\n"
             "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            "Access-Control-Allow-Headers: Content-Type\r\n"
             "Cache-Control: no-store\r\n"
             "\r\n"
             "%s",
@@ -629,6 +726,8 @@ static void send_bytes(int fd, const char *status, const char *type, const uint8
             "Content-Length: %zu\r\n"
             "Connection: close\r\n"
             "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            "Access-Control-Allow-Headers: Content-Type\r\n"
             "Cache-Control: no-store\r\n"
             "\r\n",
             status, type, body_len);
@@ -818,6 +917,27 @@ static void handle_client(int fd) {
     }
     req[n] = '\0';
 
+    char *request_body = strstr(req, "\r\n\r\n");
+    if (request_body) {
+        request_body += 4;
+        long content_length = header_long(req, "Content-Length", 0);
+        while (content_length > 0 && (long)strlen(request_body) < content_length &&
+               n < (ssize_t)sizeof(req) - 1) {
+            ssize_t more = read(fd, req + n, sizeof(req) - 1 - (size_t)n);
+            if (more <= 0) {
+                break;
+            }
+            n += more;
+            req[n] = '\0';
+            request_body = strstr(req, "\r\n\r\n");
+            if (request_body) {
+                request_body += 4;
+            }
+        }
+    } else {
+        request_body = "";
+    }
+
     char method[16] = {0};
     char path[1024] = {0};
     if (sscanf(req, "%15s %1023s", method, path) != 2) {
@@ -830,7 +950,7 @@ static void handle_client(int fd) {
         return;
     }
 
-    if (strcmp(method, "GET") == 0 && strncmp(path, "/api/status", 11) == 0) {
+    if (strcmp(method, "GET") == 0 && strcmp(path, "/api/status") == 0) {
         char body[2048];
         status_json(body, sizeof(body));
         send_response(fd, "200 OK", "application/json", body);
@@ -849,77 +969,134 @@ static void handle_client(int fd) {
         return;
     }
 
+    bool needs_json_body = strcmp(path, "/api/drop") == 0 ||
+                           strcmp(path, "/api/drop_for") == 0 ||
+                           strcmp(path, "/api/drop_pid0_for") == 0 ||
+                           strcmp(path, "/api/drop_pid_for") == 0 ||
+                           strcmp(path, "/api/drop_null_for") == 0 ||
+                           strcmp(path, "/api/drop_every") == 0 ||
+                           strcmp(path, "/api/jitter") == 0 ||
+                           strcmp(path, "/api/corrupt") == 0 ||
+                           strcmp(path, "/api/flip_tei") == 0 ||
+                           strcmp(path, "/api/replace_sync_for") == 0 ||
+                           strcmp(path, "/api/fault_adaptation_length") == 0 ||
+                           strcmp(path, "/api/enable_pusi_for") == 0;
+    if (needs_json_body && !header_has_token(req, "Content-Type", "application/json")) {
+        send_response(fd, "400 Bad Request", "text/plain", "bad request\n");
+        return;
+    }
+    if (needs_json_body && !json_object_body(request_body)) {
+        send_response(fd, "400 Bad Request", "text/plain", "bad request\n");
+        return;
+    }
+
+    bool bad_request = false;
+
     pthread_mutex_lock(&g_state_lock);
-    if (strncmp(path, "/api/drop?", 10) == 0) {
-        long packets = query_long(path, "packets", 1);
-        if (packets > 0) {
+    if (strcmp(path, "/api/drop") == 0) {
+        long packets = 0;
+        if (!json_long(request_body, "packets", &packets) || packets <= 0) {
+            bad_request = true;
+        } else {
             g_state.drop_next_packets += (uint64_t)packets;
         }
-    } else if (strncmp(path, "/api/drop_for?", 14) == 0) {
-        long ms = query_long(path, "ms", 1000);
-        if (ms > 0) {
+    } else if (strcmp(path, "/api/drop_for") == 0) {
+        long ms = 0;
+        if (!json_long(request_body, "ms", &ms) || ms <= 0) {
+            bad_request = true;
+        } else {
             g_state.drop_until_ms = now_ms() + ms;
         }
-    } else if (strncmp(path, "/api/drop_pid0_for?", 19) == 0) {
-        long ms = query_long(path, "ms", 1000);
-        if (ms > 0) {
+    } else if (strcmp(path, "/api/drop_pid0_for") == 0) {
+        long ms = 0;
+        if (!json_long(request_body, "ms", &ms) || ms <= 0) {
+            bad_request = true;
+        } else {
             g_state.drop_pid0_until_ms = now_ms() + ms;
         }
-    } else if (strncmp(path, "/api/drop_pid_for?", 18) == 0) {
-        long ms = query_long(path, "ms", 1000);
-        long pid = query_long(path, "pid", 49);
-        if (ms > 0 && pid >= 0 && pid <= 8191) {
+    } else if (strcmp(path, "/api/drop_pid_for") == 0) {
+        long ms = 0;
+        long pid = 0;
+        if (!json_long(request_body, "ms", &ms) ||
+            !json_long(request_body, "pid", &pid) ||
+            ms <= 0 || pid < 0 || pid > 8191) {
+            bad_request = true;
+        } else {
             g_state.drop_pid_until_ms = now_ms() + ms;
             g_state.drop_pid = (uint16_t)pid;
         }
-    } else if (strncmp(path, "/api/drop_null_for?", 19) == 0) {
-        long seconds = query_long(path, "seconds", 1);
-        if (seconds > 0) {
+    } else if (strcmp(path, "/api/drop_null_for") == 0) {
+        long seconds = 0;
+        if (!json_long(request_body, "seconds", &seconds) || seconds <= 0) {
+            bad_request = true;
+        } else {
             g_state.drop_null_until_ms = now_ms() + (seconds * 1000);
         }
-    } else if (strncmp(path, "/api/drop_every?", 16) == 0) {
-        long n_every = query_long(path, "n", 0);
-        g_state.drop_every_n = n_every > 0 ? (uint32_t)n_every : 0;
-    } else if (strncmp(path, "/api/jitter?", 12) == 0) {
-        long ms = query_long(path, "ms", 100);
-        long count = query_long(path, "count", 1);
-        g_state.jitter_ms = ms > 0 ? (uint32_t)ms : 0;
-        g_state.jitter_remaining = count > 0 ? (uint32_t)count : 0;
-    } else if (strncmp(path, "/api/corrupt?", 13) == 0) {
-        long bytes = query_long(path, "bytes", TS_PACKET_SIZE);
-        if (bytes > 0) {
+    } else if (strcmp(path, "/api/drop_every") == 0) {
+        long n_every = 0;
+        if (!json_long(request_body, "n", &n_every) || n_every < 0) {
+            bad_request = true;
+        } else {
+            g_state.drop_every_n = n_every > 0 ? (uint32_t)n_every : 0;
+        }
+    } else if (strcmp(path, "/api/jitter") == 0) {
+        long ms = 0;
+        long count = 0;
+        if (!json_long(request_body, "ms", &ms) ||
+            !json_long(request_body, "count", &count) ||
+            ms <= 0 || count <= 0) {
+            bad_request = true;
+        } else {
+            g_state.jitter_ms = (uint32_t)ms;
+            g_state.jitter_remaining = (uint32_t)count;
+        }
+    } else if (strcmp(path, "/api/corrupt") == 0) {
+        long bytes = 0;
+        if (!json_long(request_body, "bytes", &bytes) || bytes <= 0) {
+            bad_request = true;
+        } else {
             g_state.corrupt_next_bytes += (uint32_t)bytes;
         }
-    } else if (strncmp(path, "/api/flip_tei?", 14) == 0) {
-        long packets = query_long(path, "packets", 1);
-        if (packets > 0) {
+    } else if (strcmp(path, "/api/flip_tei") == 0) {
+        long packets = 0;
+        if (!json_long(request_body, "packets", &packets) || packets <= 0) {
+            bad_request = true;
+        } else {
             g_state.flip_tei_next_packets += (uint64_t)packets;
         }
-    } else if (strncmp(path, "/api/replace_sync_for?", 22) == 0) {
-        long seconds = query_long(path, "seconds", 1);
-        if (seconds > 0) {
+    } else if (strcmp(path, "/api/replace_sync_for") == 0) {
+        long seconds = 0;
+        if (!json_long(request_body, "seconds", &seconds) || seconds <= 0) {
+            bad_request = true;
+        } else {
             g_state.replace_sync_until_ms = now_ms() + (seconds * 1000);
         }
-    } else if (strncmp(path, "/api/fault_adaptation_length?", 29) == 0) {
-        long packets = query_long(path, "packets", 1);
-        long pid = query_long(path, "pid", 49);
-        if (packets > 0) {
+    } else if (strcmp(path, "/api/fault_adaptation_length") == 0) {
+        long packets = 0;
+        long pid = 0;
+        if (!json_long(request_body, "packets", &packets) ||
+            !json_long(request_body, "pid", &pid) ||
+            packets <= 0 || pid < 0 || pid > 8191) {
+            bad_request = true;
+        } else {
             g_state.adaptation_length_next_packets += (uint64_t)packets;
-            if (pid >= 0 && pid <= 8191) {
-                g_state.adaptation_length_pid = (uint16_t)pid;
-            }
+            g_state.adaptation_length_pid = (uint16_t)pid;
         }
-    } else if (strncmp(path, "/api/udp_packet_reorder", 23) == 0) {
+    } else if (strcmp(path, "/api/udp_packet_reorder") == 0) {
         g_state.udp_reorder_pending++;
-    } else if (strncmp(path, "/api/enable_pusi_for?", 21) == 0) {
-        long frames = query_long(path, "frames", 1);
-        long pid = query_long(path, "pid", 49);
-        if (frames > 0 && pid >= 0 && pid <= 8191) {
+    } else if (strcmp(path, "/api/enable_pusi_for") == 0) {
+        long frames = 0;
+        long pid = 0;
+        if (!json_long(request_body, "frames", &frames) ||
+            !json_long(request_body, "pid", &pid) ||
+            frames <= 0 || pid < 0 || pid > 8191) {
+            bad_request = true;
+        } else {
             g_state.pusi_frames_remaining = (uint32_t)frames;
             g_state.pusi_pid = (uint16_t)pid;
             g_state.pusi_waiting = true;
         }
-    } else if (strncmp(path, "/api/reset", 10) == 0) {
+    } else if (strcmp(path, "/api/reset") == 0) {
         g_state.drop_next_packets = 0;
         g_state.drop_until_ms = 0;
         g_state.drop_pid0_until_ms = 0;
@@ -944,6 +1121,11 @@ static void handle_client(int fd) {
         return;
     }
     pthread_mutex_unlock(&g_state_lock);
+
+    if (bad_request) {
+        send_response(fd, "400 Bad Request", "text/plain", "bad request\n");
+        return;
+    }
 
     char body[2048];
     status_json(body, sizeof(body));

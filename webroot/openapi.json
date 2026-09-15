@@ -1,0 +1,923 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Saboteur Web API",
+    "version": "1.0.0",
+    "description": "HTTP API for inspecting Saboteur MPEG-TS forwarding state and triggering stream fault injection commands."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:9601",
+      "description": "Default local Saboteur HTTP server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Status",
+      "description": "Runtime stream counters and active fault state."
+    },
+    {
+      "name": "Faults",
+      "description": "Commands that inject or clear MPEG-TS stream faults."
+    }
+  ],
+  "paths": {
+    "/api/status": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Get current status",
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Drop upcoming packets",
+        "description": "Queues the next N MPEG-TS packets to be dropped before forwarding.",
+        "operationId": "dropPackets",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Packets"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Drop packets for a duration",
+        "description": "Drops every MPEG-TS packet for the selected number of milliseconds.",
+        "operationId": "dropFor",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Milliseconds"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop_pid0_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Drop PID 0 packets for a duration",
+        "description": "Drops PAT packets, PID 0, for the selected number of milliseconds.",
+        "operationId": "dropPid0For",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Milliseconds"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop_pid_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Drop packets for a PID",
+        "description": "Drops packets matching a PID for the selected number of milliseconds.",
+        "operationId": "dropPidFor",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/MillisecondsAndPid"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop_null_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Drop null packets for a duration",
+        "description": "Drops MPEG-TS null packets, PID 8191, for the selected number of seconds.",
+        "operationId": "dropNullFor",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Seconds"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/drop_every": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Set recurring packet drop pattern",
+        "description": "Drops one packet out of every N input packets. Set N to 0 to disable the pattern.",
+        "operationId": "dropEvery",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/DropEvery"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/jitter": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Inject forwarding jitter",
+        "description": "Adds a delay before forwarding packets, repeated for the selected count.",
+        "operationId": "injectJitter",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Jitter"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/corrupt": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Corrupt upcoming bytes",
+        "description": "Flips bits in the next N bytes of outgoing MPEG-TS packet payload.",
+        "operationId": "corruptBytes",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Bytes"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/flip_tei": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Flip TEI bit on upcoming packets",
+        "description": "Toggles the Transport Error Indicator bit on the next N outgoing MPEG-TS packets.",
+        "operationId": "flipTei",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Packets"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/replace_sync_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Replace sync bytes for a duration",
+        "description": "Changes each outgoing TS sync byte from 0x47 to 0x74 for the selected number of seconds.",
+        "operationId": "replaceSyncFor",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Seconds"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/fault_adaptation_length": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Fault adaptation field length",
+        "description": "For matching PID packets, enables adaptation plus payload and sets adaptation length to 191.",
+        "operationId": "faultAdaptationLength",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/PacketsAndPid"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/udp_packet_reorder": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Reorder UDP packet groups once",
+        "description": "Captures three 7-packet UDP payloads and sends them once as A, C, then B.",
+        "operationId": "udpPacketReorder",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/EmptyCommand"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/enable_pusi_for": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Set PUSI on packets for UDP frames",
+        "description": "Waits for the PID, then sets PUSI on matching packets for N UDP frames.",
+        "operationId": "enablePusiFor",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/FramesAndPid"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/reset": {
+      "post": {
+        "tags": [
+          "Faults"
+        ],
+        "summary": "Clear active fault settings",
+        "description": "Clears queued and time-based faults while preserving accumulated counters.",
+        "operationId": "resetFaults",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/EmptyCommand"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/StatusResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "requestBodies": {
+      "EmptyCommand": {
+        "description": "Empty JSON object.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            },
+            "examples": {
+              "empty": {
+                "value": {}
+              }
+            }
+          }
+        }
+      },
+      "Packets": {
+        "description": "Packet count command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PacketsCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "Milliseconds": {
+        "description": "Millisecond duration command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MillisecondsCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "MillisecondsAndPid": {
+        "description": "Millisecond duration and PID command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MillisecondsAndPidCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "Seconds": {
+        "description": "Second duration command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SecondsCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "DropEvery": {
+        "description": "Recurring packet drop command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DropEveryCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "Jitter": {
+        "description": "Jitter command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/JitterCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "Bytes": {
+        "description": "Byte count command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BytesCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "PacketsAndPid": {
+        "description": "Packet count and PID command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PacketsAndPidCommand"
+            }
+          }
+        },
+        "required": true
+      },
+      "FramesAndPid": {
+        "description": "UDP frame count and PID command body.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FramesAndPidCommand"
+            }
+          }
+        },
+        "required": true
+      }
+    },
+    "schemas": {
+      "Pid": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 8191
+      },
+      "PacketsCommand": {
+        "type": "object",
+        "required": [
+          "packets"
+        ],
+        "properties": {
+          "packets": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "MillisecondsCommand": {
+        "type": "object",
+        "required": [
+          "ms"
+        ],
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "MillisecondsAndPidCommand": {
+        "type": "object",
+        "required": [
+          "ms",
+          "pid"
+        ],
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pid": {
+            "$ref": "#/components/schemas/Pid"
+          }
+        }
+      },
+      "SecondsCommand": {
+        "type": "object",
+        "required": [
+          "seconds"
+        ],
+        "properties": {
+          "seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "DropEveryCommand": {
+        "type": "object",
+        "required": [
+          "n"
+        ],
+        "properties": {
+          "n": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Drop one packet every N packets. A value of 0 disables the pattern."
+          }
+        }
+      },
+      "JitterCommand": {
+        "type": "object",
+        "required": [
+          "ms",
+          "count"
+        ],
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "BytesCommand": {
+        "type": "object",
+        "required": [
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "PacketsAndPidCommand": {
+        "type": "object",
+        "required": [
+          "packets",
+          "pid"
+        ],
+        "properties": {
+          "packets": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pid": {
+            "$ref": "#/components/schemas/Pid"
+          }
+        }
+      },
+      "FramesAndPidCommand": {
+        "type": "object",
+        "required": [
+          "frames",
+          "pid"
+        ],
+        "properties": {
+          "frames": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pid": {
+            "$ref": "#/components/schemas/Pid"
+          }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "input_url",
+          "output_url",
+          "latency_ms",
+          "packets_in",
+          "packets_out",
+          "packets_dropped",
+          "pid0_packets_dropped",
+          "pid_packets_dropped",
+          "null_packets_dropped",
+          "tei_packets_flipped",
+          "sync_bytes_replaced",
+          "adaptation_lengths_faulted",
+          "udp_reorders_completed",
+          "pusi_packets_faulted",
+          "pusi_frames_faulted",
+          "chunks_in",
+          "chunks_out",
+          "bytes_in",
+          "bytes_out",
+          "bytes_corrupted",
+          "read_errors",
+          "write_errors",
+          "drop_next_packets",
+          "drop_ms_remaining",
+          "drop_pid0_ms_remaining",
+          "drop_pid_ms_remaining",
+          "drop_null_ms_remaining",
+          "drop_pid",
+          "drop_every_n",
+          "jitter_ms",
+          "jitter_remaining",
+          "corrupt_next_bytes",
+          "flip_tei_next_packets",
+          "replace_sync_ms_remaining",
+          "adaptation_length_next_packets",
+          "adaptation_length_pid",
+          "udp_reorder_pending",
+          "pusi_frames_remaining",
+          "pusi_pid",
+          "pusi_waiting"
+        ],
+        "properties": {
+          "input_url": {
+            "type": "string",
+            "description": "Configured FFmpeg input URL."
+          },
+          "output_url": {
+            "type": "string",
+            "description": "Configured FFmpeg output URL."
+          },
+          "latency_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Configured output latency in milliseconds."
+          },
+          "packets_in": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "packets_out": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "packets_dropped": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pid0_packets_dropped": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pid_packets_dropped": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "null_packets_dropped": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "tei_packets_flipped": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "sync_bytes_replaced": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "adaptation_lengths_faulted": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "udp_reorders_completed": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pusi_packets_faulted": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pusi_frames_faulted": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "chunks_in": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "chunks_out": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "bytes_in": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "bytes_out": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "bytes_corrupted": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "read_errors": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "write_errors": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "drop_next_packets": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "drop_ms_remaining": {
+            "$ref": "#/components/schemas/DurationRemaining"
+          },
+          "drop_pid0_ms_remaining": {
+            "$ref": "#/components/schemas/DurationRemaining"
+          },
+          "drop_pid_ms_remaining": {
+            "$ref": "#/components/schemas/DurationRemaining"
+          },
+          "drop_null_ms_remaining": {
+            "$ref": "#/components/schemas/DurationRemaining"
+          },
+          "drop_pid": {
+            "$ref": "#/components/schemas/Pid"
+          },
+          "drop_every_n": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current recurring packet drop interval. 0 means disabled."
+          },
+          "jitter_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current jitter delay in milliseconds."
+          },
+          "jitter_remaining": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "corrupt_next_bytes": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "flip_tei_next_packets": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "replace_sync_ms_remaining": {
+            "$ref": "#/components/schemas/DurationRemaining"
+          },
+          "adaptation_length_next_packets": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "adaptation_length_pid": {
+            "$ref": "#/components/schemas/Pid"
+          },
+          "udp_reorder_pending": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pusi_frames_remaining": {
+            "$ref": "#/components/schemas/Counter"
+          },
+          "pusi_pid": {
+            "$ref": "#/components/schemas/Pid"
+          },
+          "pusi_waiting": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "1 while PUSI faulting is waiting for the target PID to appear; otherwise 0."
+          }
+        }
+      },
+      "PlainTextError": {
+        "type": "string"
+      },
+      "Counter": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "DurationRemaining": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Approximate milliseconds remaining for an active timed fault."
+      }
+    },
+    "responses": {
+      "StatusResponse": {
+        "description": "Current stream counters and active fault state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Status"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested API path was not found.",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "$ref": "#/components/schemas/PlainTextError"
+            },
+            "examples": {
+              "notFound": {
+                "value": "not found\n"
+              }
+            }
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "The HTTP method is not supported for this path.",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "$ref": "#/components/schemas/PlainTextError"
+            },
+            "examples": {
+              "methodNotAllowed": {
+                "value": "method not allowed\n"
+              }
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "The request was malformed or a required JSON body field was missing or invalid.",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "$ref": "#/components/schemas/PlainTextError"
+            },
+            "examples": {
+              "badRequest": {
+                "value": "bad request\n"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

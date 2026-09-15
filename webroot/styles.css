@@ -169,7 +169,8 @@ dt {
 }
 
 .stats {
-  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
@@ -183,7 +184,12 @@ dt {
 }
 
 .stat-card {
+  flex: 1 1 155px;
   padding: 14px;
+}
+
+.stat-card:nth-child(-n + 2) {
+  flex-basis: 233px;
 }
 
 .stats span {

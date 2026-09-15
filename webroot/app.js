@@ -183,9 +183,13 @@ class SaboteurApp extends HTMLElement {
     this.updateLiveValues();
   }
 
-  async postCommand(path) {
+  async postCommand(path, payload = {}) {
     try {
-      const response = await fetch(path, { method: "POST" });
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       if (!response.ok) {
         throw new Error(`command failed: ${response.status}`);
       }
@@ -362,9 +366,11 @@ class SaboteurApp extends HTMLElement {
   submitControl(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const params = new URLSearchParams();
-    new FormData(form).forEach((value, key) => params.set(key, value));
-    this.postCommand(`${form.dataset.command}?${params.toString()}`);
+    const payload = {};
+    new FormData(form).forEach((value, key) => {
+      payload[key] = Number(value);
+    });
+    this.postCommand(form.dataset.command, payload);
   }
 }
 
