@@ -119,6 +119,11 @@ static void on_signal(int sig) {
     g_stop = 1;
 }
 
+static int ffmpeg_interrupt_cb(void *opaque) {
+    (void)opaque;
+    return g_stop != 0;
+}
+
 static void fferr(char *dst, size_t dst_len, int errnum) {
     av_strerror(errnum, dst, dst_len);
 }
@@ -688,8 +693,12 @@ static void *stream_thread(void *arg) {
     OutputState output = {0};
     output.latency_ms = cfg->latency_ms;
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    AVIOInterruptCB interrupt_cb = {
+        .callback = ffmpeg_interrupt_cb,
+        .opaque = NULL,
+    };
 
-    int ret = avio_open2(&in, cfg->input_url, AVIO_FLAG_READ, NULL, NULL);
+    int ret = avio_open2(&in, cfg->input_url, AVIO_FLAG_READ, &interrupt_cb, NULL);
     if (ret < 0) {
         fferr(errbuf, sizeof(errbuf), ret);
         fprintf(stderr, "failed to open input %s: %s\n", cfg->input_url, errbuf);
@@ -697,7 +706,7 @@ static void *stream_thread(void *arg) {
         return NULL;
     }
 
-    ret = avio_open2(&out, cfg->output_url, AVIO_FLAG_WRITE, NULL, NULL);
+    ret = avio_open2(&out, cfg->output_url, AVIO_FLAG_WRITE, &interrupt_cb, NULL);
     if (ret < 0) {
         fferr(errbuf, sizeof(errbuf), ret);
         fprintf(stderr, "failed to open output %s: %s\n", cfg->output_url, errbuf);
